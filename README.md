@@ -14,7 +14,7 @@ Year: 2024
 
 To install the cache server run:
 ```console
-git clone TODO
+git clone https://github.com/xkriza08/cache-server.git
 cd cache-server/
 nix-build
 ```
