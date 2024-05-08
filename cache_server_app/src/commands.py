@@ -38,8 +38,12 @@ class CacheServerCommandHandler():
         self.database = CacheServerDatabase()
 
     def save_pid(self, filename: str) -> None:
-        with open(filename, "w") as f:
-            f.write(str(os.getpid()))
+        try:
+            with open(filename, "w") as f:
+                f.write(str(os.getpid()))
+        except PermissionError:
+            print("ERROR: Can't create file %s. Permission denied." % filename)
+            sys.exit(1)
 
     def get_pid(self, filename: str) -> int | None:
         try:
@@ -47,12 +51,18 @@ class CacheServerCommandHandler():
                 return int(f.read().strip())
         except FileNotFoundError:
             return None
+        except PermissionError:
+            print("ERROR: Can't read file %s. Permission denied." % filename)
+            sys.exit(1)
 
     def remove_pid(self, filename: str) -> None:
         try:
             os.remove(filename)
         except FileNotFoundError:
             pass
+        except PermissionError:
+            print("ERROR: Can't remove file %s. Permission denied." % filename)
+            sys.exit(1)
 
     # cache-server listen
     def listen_command(self) -> None:
@@ -67,14 +77,15 @@ class CacheServerCommandHandler():
         asyncio.run(ws_handler.run())
 
     def start_server(self) -> None:
+        pid_file = "/var/run/cache-server.pid"
+        self.save_pid(pid_file)
+
         ws_handler = WebSocketConnectionHandler(config.deploy_port)
         ws_thread = threading.Thread(target=self.start_workspace, args=(ws_handler,))
         ws_thread.start()
         server = HTTPCacheServer(
             ("localhost", config.server_port), CacheServerRequestHandler, ws_handler)
         print("Server started http://localhost:%d" % config.server_port)
-        pid_file = "/var/run/cache-server.pid"
-        self.save_pid(pid_file)
         CacheServerDatabase().create_database()
         server.serve_forever()
 
@@ -116,6 +127,9 @@ class CacheServerCommandHandler():
         except FileExistsError:
             print("ERROR: Directory %s already exists." % cache.cache_dir)
             sys.exit(1)
+        except PermissionError:
+            print("ERROR: Can't create directory %s. Permission denied." % cache.cache_dir)
+            sys.exit(1)
         cache.generate_keys()
         cache.save()
         
@@ -138,12 +152,13 @@ class CacheServerCommandHandler():
             print("ERROR: Binary cache %s does not exist." % name)
             sys.exit(1)
 
+        pid_file = '/var/run/{}.pid'.format(cache.id)
+        self.save_pid(pid_file)
+
         if cache.retention > 0:
             ws_thread = threading.Thread(target=cache.garbage_collector)
             ws_thread.start()
 
-        pid_file = '/var/run/{}.pid'.format(cache.id)
-        self.save_pid(pid_file)
         server = HTTPBinaryCache(
             ("localhost", port), BinaryCacheRequestHandler, cache)
         print("Binary cache started http://localhost:%d" % port)
@@ -188,7 +203,11 @@ class CacheServerCommandHandler():
             sys.exit(1)
 
         cache_dir = os.path.join(config.cache_dir, name)
-        shutil.rmtree(cache_dir)
+        try:
+            shutil.rmtree(cache_dir)
+        except PermissionError:
+            print("ERROR: Can't delete directory %s. Permission denied." % cache_dir)
+            sys.exit(1)
         cache.delete()
 
     # cache-server agent add <name> <workspace_name>
